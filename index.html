@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>LIQUID SILK — trackpad playground</title>
+<style>
+  :root {
+    --ink: #e9e4da;
+    --ink-dim: rgba(233, 228, 218, 0.45);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    height: 100%;
+    overflow: hidden;
+    background: #06060a;
+    font-family: "SF Pro Display", -apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif;
+    cursor: none;
+    overscroll-behavior: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  canvas#gl {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    display: block;
+  }
+
+  /* ---------- custom cursor ---------- */
+  .cursor-dot, .cursor-ring {
+    position: fixed;
+    top: 0; left: 0;
+    pointer-events: none;
+    z-index: 50;
+    will-change: transform;
+  }
+  .cursor-dot {
+    width: 6px; height: 6px;
+    margin: -3px 0 0 -3px;
+    border-radius: 50%;
+    background: var(--ink);
+    mix-blend-mode: difference;
+  }
+  .cursor-ring {
+    width: 42px; height: 42px;
+    margin: -21px 0 0 -21px;
+    border-radius: 50%;
+    border: 1px solid rgba(233, 228, 218, 0.55);
+    mix-blend-mode: difference;
+    transition: width .25s cubic-bezier(.2,.8,.2,1), height .25s cubic-bezier(.2,.8,.2,1),
+                margin .25s cubic-bezier(.2,.8,.2,1), opacity .3s ease;
+  }
+
+  /* ---------- chrome / UI ---------- */
+  .ui {
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    pointer-events: none;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: clamp(20px, 4vw, 48px);
+    color: var(--ink);
+  }
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    opacity: 0;
+    animation: fadeDown 1.4s cubic-bezier(.2,.8,.2,1) .3s forwards;
+  }
+  .brand {
+    font-size: 11px;
+    letter-spacing: .42em;
+    text-transform: uppercase;
+    font-weight: 500;
+  }
+  .brand span { color: var(--ink-dim); }
+  .index { font-size: 11px; letter-spacing: .3em; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+
+  .hero {
+    position: absolute;
+    left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    opacity: 0;
+    animation: fadeUp 1.8s cubic-bezier(.2,.8,.2,1) .6s forwards;
+    will-change: transform;
+  }
+  .hero h1 {
+    font-size: clamp(44px, 9vw, 132px);
+    font-weight: 200;
+    letter-spacing: .12em;
+    line-height: 1.04;
+    text-transform: uppercase;
+    background: linear-gradient(115deg, #f5f1e8 20%, rgba(245,241,232,.35) 50%, #f5f1e8 80%);
+    background-size: 220% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: shimmer 7s ease-in-out infinite;
+  }
+  .hero h1 b { font-weight: 600; }
+  .hero p {
+    margin-top: 18px;
+    font-size: 12px;
+    letter-spacing: .38em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+  }
+
+  footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    opacity: 0;
+    animation: fadeUp 1.4s cubic-bezier(.2,.8,.2,1) 1s forwards;
+  }
+  .hints { display: flex; gap: clamp(14px, 3vw, 40px); flex-wrap: wrap; }
+  .hint {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 10px;
+    letter-spacing: .22em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+  }
+  .hint kbd {
+    font-family: inherit;
+    font-size: 9px;
+    letter-spacing: .14em;
+    padding: 5px 9px;
+    border: 1px solid rgba(233,228,218,.22);
+    border-radius: 7px;
+    color: var(--ink);
+    background: rgba(255,255,255,.04);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+  .meta {
+    font-size: 10px;
+    letter-spacing: .26em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.9;
+  }
+  .meta b { color: var(--ink); font-weight: 500; }
+  .credit {
+    margin-top: 8px;
+    pointer-events: auto;
+  }
+  .credit a {
+    color: var(--ink);
+    text-decoration: none;
+    border-bottom: 1px solid rgba(233,228,218,.3);
+    padding-bottom: 1px;
+    transition: border-color .25s ease;
+  }
+  .credit a:hover { border-color: var(--ink); }
+
+  @keyframes fadeDown { from { opacity: 0; transform: translateY(-14px); } to { opacity: 1; transform: none; } }
+  @keyframes fadeUp   { from { opacity: 0; transform: translateY(14px); }  to { opacity: 1; transform: none; } }
+  @keyframes shimmer  { 0%,100% { background-position: 0% 0; } 50% { background-position: 100% 0; } }
+
+  @media (pointer: coarse) {
+    body { cursor: auto; }
+    .cursor-dot, .cursor-ring { display: none; }
+  }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+
+<div class="ui">
+  <header>
+    <div class="brand">LIQUID&nbsp;SILK <span>/ ATELIER</span></div>
+    <div class="index" id="coords">00.00&nbsp;&nbsp;00.00</div>
+  </header>
+
+  <div class="hero" id="hero">
+    <h1>Liquid<br><b>Silk</b></h1>
+    <p>move &nbsp;·&nbsp; scroll &nbsp;·&nbsp; pinch &nbsp;·&nbsp; click</p>
+  </div>
+
+  <footer>
+    <div class="hints">
+      <div class="hint"><kbd>2-finger scroll</kbd> hue &amp; flow</div>
+      <div class="hint"><kbd>pinch</kbd> zoom</div>
+      <div class="hint"><kbd>click</kbd> shockwave</div>
+      <div class="hint"><kbd>double click</kbd> burst</div>
+    </div>
+    <div class="meta">
+      zoom <b id="zoomVal">1.00</b><br>
+      hue <b id="hueVal">000</b>
+      <div class="credit">created by <a href="https://sitespro.org" target="_blank" rel="noopener">SitesPro</a></div>
+    </div>
+  </footer>
+</div>
+
+<div class="cursor-ring" id="cursorRing"></div>
+<div class="cursor-dot" id="cursorDot"></div>
+
+<script>
+'use strict';
+
+/* ================================================================
+   LIQUID SILK — WebGL pointer-reactive fluid, tuned for Apple
+   trackpads: two-finger scroll, pinch (gesture events + ctrl+wheel),
+   inertial deltas. No libraries, single file.
+   ================================================================ */
+
+const canvas = document.getElementById('gl');
+const gl = canvas.getContext('webgl', { antialias: false, alpha: false, powerPreference: 'high-performance' });
+
+if (!gl) {
+  document.body.innerHTML = '<p style="color:#fff;font:16px sans-serif;padding:40px">WebGL is not available in this browser.</p>';
+  throw new Error('no webgl');
+}
+
+const TRAIL_N = 24;
+const RIPPLE_N = 10;
+
+/* ---------------- shaders ---------------- */
+
+const VERT = `
+attribute vec2 aPos;
+void main() { gl_Position = vec4(aPos, 0.0, 1.0); }
+`;
+
+const FRAG = `
+precision highp float;
+
+uniform vec2  uRes;
+uniform float uTime;
+uniform vec2  uMouse;       // aspect-corrected uv
+uniform vec2  uVel;         // smoothed pointer velocity
+uniform float uZoom;
+uniform float uHue;         // scroll-driven hue offset
+uniform float uFlow;        // scroll-driven flow offset
+uniform float uCalm;        // 1 when idle, 0 when active
+uniform vec4  uTrail[${TRAIL_N}];   // xy, age, strength
+uniform vec4  uRipples[${RIPPLE_N}]; // xy, birth time, strength
+
+#define PI 3.14159265
+
+mat2 rot(float a){ float c=cos(a), s=sin(a); return mat2(c,-s,s,c); }
+
+float hash(vec2 p){
+  p = fract(p * vec2(234.34, 435.345));
+  p += dot(p, p + 34.23);
+  return fract(p.x * p.y);
+}
+
+float noise(vec2 p){
+  vec2 i = floor(p), f = fract(p);
+  vec2 u = f*f*(3.0-2.0*f);
+  return mix(
+    mix(hash(i), hash(i+vec2(1,0)), u.x),
+    mix(hash(i+vec2(0,1)), hash(i+vec2(1,1)), u.x), u.y);
+}
+
+float fbm(vec2 p){
+  float v = 0.0, a = 0.5;
+  mat2 m = rot(0.5);
+  for(int i=0;i<5;i++){
+    v += a * noise(p);
+    p = m * p * 2.02;
+    a *= 0.5;
+  }
+  return v;
+}
+
+/* luxury cosine palette: deep ink -> teal -> violet -> champagne gold */
+vec3 palette(float t){
+  vec3 a = vec3(0.36, 0.32, 0.38);
+  vec3 b = vec3(0.42, 0.36, 0.40);
+  vec3 c = vec3(1.00, 1.00, 1.00);
+  vec3 d = vec3(0.00, 0.18, 0.42);
+  return a + b * cos(2.0*PI*(c*t + d));
+}
+
+void main(){
+  vec2 frag = gl_FragCoord.xy / uRes;
+  vec2 uv = (gl_FragCoord.xy - 0.5*uRes) / min(uRes.x, uRes.y); // centered, aspect-safe
+  uv /= uZoom;
+
+  vec2 m = uMouse;          // same space as uv
+  float t = uTime * 0.12;
+
+  /* ---- ripples: radial displacement waves ---- */
+  vec2 disp = vec2(0.0);
+  float rippleGlow = 0.0;
+  for(int i=0;i<${RIPPLE_N};i++){
+    vec4 R = uRipples[i];
+    if(R.w <= 0.001) continue;
+    float age = uTime - R.z;
+    if(age < 0.0 || age > 3.5) continue;
+    vec2 dir = uv - R.xy;
+    float d = length(dir);
+    float radius = age * 0.55;
+    float band = d - radius;
+    float wave = sin(band * 60.0) * exp(-band*band*180.0) * exp(-age*1.4) * R.w;
+    disp += normalize(dir + 1e-5) * wave * 0.035;
+    rippleGlow += exp(-band*band*420.0) * exp(-age*1.8) * R.w * 0.5;
+  }
+
+  /* ---- pointer swirl: rotate space around cursor ---- */
+  float speed = length(uVel);
+  vec2 toM = uv - m;
+  float dM = length(toM);
+  float swirlAmt = exp(-dM*dM*9.0) * clamp(speed*6.0, 0.0, 1.2) * 1.4;
+  uv = m + rot(swirlAmt) * toM;
+
+  /* gentle lens bulge under the cursor */
+  uv -= normalize(toM + 1e-5) * exp(-dM*dM*16.0) * 0.05;
+  uv += disp;
+
+  /* ---- trail: hot points dragged by the pointer ---- */
+  float trailGlow = 0.0;
+  vec2 trailPush = vec2(0.0);
+  for(int i=0;i<${TRAIL_N};i++){
+    vec4 T = uTrail[i];
+    if(T.w <= 0.001) continue;
+    float fade = exp(-T.z * 2.2) * T.w;
+    vec2 dt = uv - T.xy;
+    float dd = dot(dt, dt);
+    trailGlow += fade * exp(-dd * 110.0);
+    trailPush += normalize(dt + 1e-5) * fade * exp(-dd * 60.0) * 0.012;
+  }
+  uv += trailPush;
+
+  /* ---- domain-warped silk ---- */
+  vec2 p = uv * 2.6;
+  p = rot(uFlow * 0.25) * p;
+  float slow = t * (0.35 + 0.65 * uCalm);
+
+  vec2 q = vec2(
+    fbm(p + vec2(0.0, 0.0) + slow * vec2(0.7, 0.2)),
+    fbm(p + vec2(5.2, 1.3) - slow * vec2(0.3, 0.6))
+  );
+  vec2 r = vec2(
+    fbm(p + 3.2*q + vec2(1.7, 9.2) + slow*0.8),
+    fbm(p + 3.2*q + vec2(8.3, 2.8) - slow*0.5)
+  );
+  float f = fbm(p + 3.0*r);
+
+  /* sharpen into silk folds */
+  float folds = pow(f, 1.6);
+  float sheen = smoothstep(0.35, 0.95, fbm(p*1.7 + r*2.0 + slow));
+
+  float hueT = folds + 0.45*length(q) + uHue + uTime*0.012;
+  vec3 col = palette(hueT);
+
+  /* deep base so the dark areas read as ink, not mud */
+  vec3 ink = vec3(0.015, 0.016, 0.030);
+  col = mix(ink, col, smoothstep(0.08, 0.85, folds + 0.35*sheen));
+
+  /* champagne sheen along fold ridges */
+  vec3 gold = vec3(0.96, 0.82, 0.55);
+  col += gold * pow(sheen, 3.0) * 0.35;
+
+  /* pointer light + trail */
+  float cursorLight = exp(-dM*dM*7.0);
+  col += palette(hueT + 0.18) * cursorLight * (0.10 + speed*1.6);
+  col += gold * trailGlow * 0.55;
+  col += vec3(0.9, 0.95, 1.0) * rippleGlow;
+
+  /* subtle chromatic split, stronger near the pointer */
+  float ab = 0.012 * (cursorLight + 0.15);
+  col.r = mix(col.r, palette(hueT + ab).r, 0.5);
+  col.b = mix(col.b, palette(hueT - ab).b, 0.5);
+
+  /* vignette + grain */
+  float vig = smoothstep(1.35, 0.35, length((frag - 0.5) * vec2(uRes.x/uRes.y, 1.0)));
+  col *= mix(0.55, 1.0, vig);
+  float grain = (hash(frag * uRes + fract(uTime)) - 0.5) * 0.055;
+  col += grain;
+
+  /* filmic-ish curve */
+  col = col / (1.0 + col * 0.35);
+  col = pow(max(col, 0.0), vec3(0.92));
+
+  gl_FragColor = vec4(col, 1.0);
+}
+`;
+
+function compile(type, src) {
+  const sh = gl.createShader(type);
+  gl.shaderSource(sh, src);
+  gl.compileShader(sh);
+  if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+    throw new Error(gl.getShaderInfoLog(sh));
+  }
+  return sh;
+}
+
+const prog = gl.createProgram();
+gl.attachShader(prog, compile(gl.VERTEX_SHADER, VERT));
+gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, FRAG));
+gl.linkProgram(prog);
+if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+gl.useProgram(prog);
+
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+const aPos = gl.getAttribLocation(prog, 'aPos');
+gl.enableVertexAttribArray(aPos);
+gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+const U = {};
+['uRes','uTime','uMouse','uVel','uZoom','uHue','uFlow','uCalm','uTrail','uRipples']
+  .forEach(n => U[n] = gl.getUniformLocation(prog, n));
+
+/* ---------------- state ---------------- */
+
+const state = {
+  mouse: { x: 0, y: 0 },        // aspect-corrected uv space
+  rawMouse: { x: innerWidth/2, y: innerHeight/2 },
+  vel: { x: 0, y: 0 },
+  smoothVel: { x: 0, y: 0 },
+  zoom: 1, zoomTarget: 1,
+  hue: 0, hueTarget: 0,
+  flow: 0, flowTarget: 0,
+  calm: 1,
+  lastMove: 0,
+  trail: new Float32Array(TRAIL_N * 4),
+  trailHead: 0,
+  ripples: new Float32Array(RIPPLE_N * 4),
+  rippleHead: 0,
+  gestureStartZoom: 1,
+};
+
+function toUV(px, py) {
+  const s = Math.min(innerWidth, innerHeight);
+  return {
+    x: (px - innerWidth / 2) / s / state.zoom,
+    y: (innerHeight / 2 - py) / s / state.zoom,
+  };
+}
+
+/* ---------------- pointer ---------------- */
+
+const cursorDot = document.getElementById('cursorDot');
+const cursorRing = document.getElementById('cursorRing');
+const coordsEl = document.getElementById('coords');
+const zoomEl = document.getElementById('zoomVal');
+const hueEl = document.getElementById('hueVal');
+const hero = document.getElementById('hero');
+
+let lastPointerT = performance.now();
+let trailAccum = 0;
+
+window.addEventListener('pointermove', (e) => {
+  const now = performance.now();
+  const dt = Math.max((now - lastPointerT) / 1000, 1e-4);
+  lastPointerT = now;
+
+  const prev = { ...state.rawMouse };
+  state.rawMouse.x = e.clientX;
+  state.rawMouse.y = e.clientY;
+
+  const s = Math.min(innerWidth, innerHeight);
+  state.vel.x = (e.clientX - prev.x) / s / dt;
+  state.vel.y = -(e.clientY - prev.y) / s / dt;
+  state.lastMove = now;
+
+  // drop trail samples by distance travelled, not by event count
+  trailAccum += Math.hypot(e.clientX - prev.x, e.clientY - prev.y);
+  if (trailAccum > 14) {
+    trailAccum = 0;
+    const uv = toUV(e.clientX, e.clientY);
+    const i = state.trailHead * 4;
+    state.trail[i] = uv.x;
+    state.trail[i+1] = uv.y;
+    state.trail[i+2] = 0; // age
+    state.trail[i+3] = Math.min(0.25 + Math.hypot(state.vel.x, state.vel.y) * 0.35, 1.0);
+    state.trailHead = (state.trailHead + 1) % TRAIL_N;
+  }
+});
+
+function spawnRipple(px, py, strength) {
+  const uv = toUV(px, py);
+  const i = state.rippleHead * 4;
+  state.ripples[i] = uv.x;
+  state.ripples[i+1] = uv.y;
+  state.ripples[i+2] = timeNow;
+  state.ripples[i+3] = strength;
+  state.rippleHead = (state.rippleHead + 1) % RIPPLE_N;
+}
+
+window.addEventListener('pointerdown', (e) => {
+  spawnRipple(e.clientX, e.clientY, 0.8);
+  cursorRing.style.width = cursorRing.style.height = '26px';
+  cursorRing.style.margin = '-13px 0 0 -13px';
+});
+window.addEventListener('pointerup', () => {
+  cursorRing.style.width = cursorRing.style.height = '42px';
+  cursorRing.style.margin = '-21px 0 0 -21px';
+});
+window.addEventListener('dblclick', (e) => {
+  // burst: three staggered rings + hue kick
+  spawnRipple(e.clientX, e.clientY, 1.4);
+  setTimeout(() => spawnRipple(e.clientX, e.clientY, 1.0), 90);
+  setTimeout(() => spawnRipple(e.clientX, e.clientY, 0.7), 200);
+  state.hueTarget += 0.45;
+});
+
+/* ---------------- trackpad: scroll + pinch ---------------- */
+
+window.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  if (e.ctrlKey) {
+    // Chrome/Edge/Firefox report trackpad pinch as ctrl+wheel
+    state.zoomTarget *= Math.exp(-e.deltaY * 0.0035);
+  } else {
+    // two-finger scroll: vertical -> hue drift, horizontal -> flow rotation
+    state.hueTarget += e.deltaY * 0.0006;
+    state.flowTarget += e.deltaX * 0.0012;
+  }
+  state.zoomTarget = Math.min(Math.max(state.zoomTarget, 0.55), 3.2);
+}, { passive: false });
+
+/* Safari trackpad pinch */
+window.addEventListener('gesturestart', (e) => {
+  e.preventDefault();
+  state.gestureStartZoom = state.zoomTarget;
+});
+window.addEventListener('gesturechange', (e) => {
+  e.preventDefault();
+  state.zoomTarget = Math.min(Math.max(state.gestureStartZoom * e.scale, 0.55), 3.2);
+});
+window.addEventListener('gestureend', (e) => e.preventDefault());
+
+/* ---------------- resize ---------------- */
+
+function resize() {
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  canvas.width = Math.round(innerWidth * dpr);
+  canvas.height = Math.round(innerHeight * dpr);
+  gl.viewport(0, 0, canvas.width, canvas.height);
+}
+window.addEventListener('resize', resize);
+resize();
+
+/* ---------------- render loop ---------------- */
+
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const t0 = performance.now();
+let timeNow = 0;
+let lastFrame = t0;
+let cursorX = innerWidth/2, cursorY = innerHeight/2;
+let ringX = cursorX, ringY = cursorY;
+
+function frame(now) {
+  const dt = Math.min((now - lastFrame) / 1000, 0.05);
+  lastFrame = now;
+  timeNow = (now - t0) / 1000 * (reduceMotion ? 0.3 : 1);
+
+  // smoothing
+  const k = 1 - Math.exp(-dt * 10);
+  state.zoom += (state.zoomTarget - state.zoom) * k;
+  state.hue  += (state.hueTarget - state.hue) * k * 0.6;
+  state.flow += (state.flowTarget - state.flow) * k * 0.6;
+  state.smoothVel.x += (state.vel.x - state.smoothVel.x) * k;
+  state.smoothVel.y += (state.vel.y - state.smoothVel.y) * k;
+
+  // decay raw velocity so it doesn't stick after the pointer stops
+  state.vel.x *= Math.exp(-dt * 6);
+  state.vel.y *= Math.exp(-dt * 6);
+
+  const idle = (now - state.lastMove) > 1600;
+  state.calm += ((idle ? 1 : 0) - state.calm) * (1 - Math.exp(-dt * 2));
+
+  // age trail
+  for (let i = 0; i < TRAIL_N; i++) state.trail[i*4+2] += dt;
+
+  const uv = toUV(state.rawMouse.x, state.rawMouse.y);
+  state.mouse.x = uv.x;
+  state.mouse.y = uv.y;
+
+  gl.uniform2f(U.uRes, canvas.width, canvas.height);
+  gl.uniform1f(U.uTime, timeNow);
+  gl.uniform2f(U.uMouse, state.mouse.x, state.mouse.y);
+  gl.uniform2f(U.uVel, state.smoothVel.x, state.smoothVel.y);
+  gl.uniform1f(U.uZoom, state.zoom);
+  gl.uniform1f(U.uHue, state.hue);
+  gl.uniform1f(U.uFlow, state.flow);
+  gl.uniform1f(U.uCalm, state.calm);
+  gl.uniform4fv(U.uTrail, state.trail);
+  gl.uniform4fv(U.uRipples, state.ripples);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+  /* cursor chase */
+  const ck = 1 - Math.exp(-dt * 30);
+  const rk = 1 - Math.exp(-dt * 12);
+  cursorX += (state.rawMouse.x - cursorX) * ck;
+  cursorY += (state.rawMouse.y - cursorY) * ck;
+  ringX += (state.rawMouse.x - ringX) * rk;
+  ringY += (state.rawMouse.y - ringY) * rk;
+  cursorDot.style.transform = `translate(${cursorX}px, ${cursorY}px)`;
+  const sp = Math.hypot(state.smoothVel.x, state.smoothVel.y);
+  cursorRing.style.transform = `translate(${ringX}px, ${ringY}px) scale(${1 + Math.min(sp * 0.5, 0.6)})`;
+  cursorRing.style.opacity = `${0.9 - Math.min(sp * 0.4, 0.5)}`;
+
+  /* hero parallax */
+  const px = (state.rawMouse.x / innerWidth - 0.5) * -26;
+  const py = (state.rawMouse.y / innerHeight - 0.5) * -18;
+  hero.style.transform = `translate(calc(-50% + ${px}px), calc(-50% + ${py}px))`;
+
+  /* HUD */
+  coordsEl.textContent =
+    `${(state.rawMouse.x / innerWidth * 100).toFixed(2).padStart(5,'0')}  ${(state.rawMouse.y / innerHeight * 100).toFixed(2).padStart(5,'0')}`;
+  zoomEl.textContent = state.zoom.toFixed(2);
+  hueEl.textContent = String(Math.round(((state.hue % 1) + 1) % 1 * 360)).padStart(3, '0');
+
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
