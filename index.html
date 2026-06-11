@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>LIQUID SILK — trackpad playground</title>
+<title>LIQUID SILK — nine scenes</title>
 <style>
   :root {
     --ink: #e9e4da;
@@ -80,18 +80,20 @@
   }
   .brand span { color: var(--ink-dim); }
   .index { font-size: 11px; letter-spacing: .3em; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+  .index b { color: var(--ink); font-weight: 500; }
 
   .hero {
     position: absolute;
     left: 50%; top: 50%;
     transform: translate(-50%, -50%);
     text-align: center;
-    opacity: 0;
-    animation: fadeUp 1.8s cubic-bezier(.2,.8,.2,1) .6s forwards;
-    will-change: transform;
+    opacity: 1;
+    transition: opacity 1.1s ease;
+    will-change: transform, opacity;
   }
+  .hero.hidden { opacity: 0; }
   .hero h1 {
-    font-size: clamp(44px, 9vw, 132px);
+    font-size: clamp(40px, 8vw, 112px);
     font-weight: 200;
     letter-spacing: .12em;
     line-height: 1.04;
@@ -111,6 +113,55 @@
     text-transform: uppercase;
     color: var(--ink-dim);
   }
+
+  /* ---------- scene rail ---------- */
+  .rail {
+    position: fixed;
+    left: clamp(20px, 4vw, 48px);
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 30;
+    display: flex;
+    flex-direction: column;
+    gap: 13px;
+    opacity: 0;
+    animation: fadeDown 1.4s cubic-bezier(.2,.8,.2,1) 1.2s forwards;
+  }
+  .rail button {
+    pointer-events: auto;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: none;
+    border: none;
+    cursor: none;
+    color: var(--ink-dim);
+    font-family: inherit;
+    font-size: 10px;
+    letter-spacing: .24em;
+    text-transform: uppercase;
+    padding: 2px 0;
+    transition: color .3s ease;
+  }
+  .rail button::before {
+    content: "";
+    display: block;
+    width: 10px;
+    height: 1px;
+    background: currentColor;
+    transition: width .35s cubic-bezier(.2,.8,.2,1);
+  }
+  .rail button .nm {
+    opacity: 0;
+    transform: translateX(-6px);
+    transition: opacity .35s ease, transform .35s cubic-bezier(.2,.8,.2,1);
+    white-space: nowrap;
+  }
+  .rail button:hover { color: var(--ink); }
+  .rail button:hover .nm { opacity: .7; transform: none; }
+  .rail button.active { color: var(--ink); }
+  .rail button.active::before { width: 26px; }
+  .rail button.active .nm { opacity: 1; transform: none; }
 
   footer {
     display: flex;
@@ -167,10 +218,14 @@
   @keyframes fadeDown { from { opacity: 0; transform: translateY(-14px); } to { opacity: 1; transform: none; } }
   @keyframes fadeUp   { from { opacity: 0; transform: translateY(14px); }  to { opacity: 1; transform: none; } }
   @keyframes shimmer  { 0%,100% { background-position: 0% 0; } 50% { background-position: 100% 0; } }
+  /* rail uses fadeDown without transform conflict — it has its own translateY */
+  .rail { animation-name: railIn; }
+  @keyframes railIn { from { opacity: 0; } to { opacity: 1; } }
 
   @media (pointer: coarse) {
     body { cursor: auto; }
     .cursor-dot, .cursor-ring { display: none; }
+    .rail button { cursor: pointer; }
   }
 </style>
 </head>
@@ -179,17 +234,18 @@
 
 <div class="ui">
   <header>
-    <div class="brand">LIQUID&nbsp;SILK <span>/ ATELIER</span></div>
-    <div class="index" id="coords">00.00&nbsp;&nbsp;00.00</div>
+    <div class="brand">LIQUID&nbsp;SILK <span>/ ATELIER · NINE SCENES</span></div>
+    <div class="index"><b id="sceneNo">01</b>/09&nbsp;&nbsp;·&nbsp;&nbsp;<span id="coords">00.00&nbsp;&nbsp;00.00</span></div>
   </header>
 
   <div class="hero" id="hero">
-    <h1>Liquid<br><b>Silk</b></h1>
-    <p>move &nbsp;·&nbsp; scroll &nbsp;·&nbsp; pinch &nbsp;·&nbsp; click</p>
+    <h1 id="heroTitle">Liquid<br><b>Silk</b></h1>
+    <p id="heroTag">move &nbsp;·&nbsp; scroll &nbsp;·&nbsp; pinch &nbsp;·&nbsp; click</p>
   </div>
 
   <footer>
     <div class="hints">
+      <div class="hint"><kbd>1–9</kbd> scenes</div>
       <div class="hint"><kbd>2-finger scroll</kbd> hue &amp; flow</div>
       <div class="hint"><kbd>pinch</kbd> zoom</div>
       <div class="hint"><kbd>click</kbd> shockwave</div>
@@ -203,6 +259,8 @@
   </footer>
 </div>
 
+<nav class="rail" id="rail"></nav>
+
 <div class="cursor-ring" id="cursorRing"></div>
 <div class="cursor-dot" id="cursorDot"></div>
 
@@ -210,9 +268,9 @@
 'use strict';
 
 /* ================================================================
-   LIQUID SILK — WebGL pointer-reactive fluid, tuned for Apple
-   trackpads: two-finger scroll, pinch (gesture events + ctrl+wheel),
-   inertial deltas. No libraries, single file.
+   LIQUID SILK · NINE SCENES — a WebGL pointer-reactive gallery
+   tuned for Apple trackpads. Keys 1–9 switch scenes.
+   No libraries, single file.
    ================================================================ */
 
 const canvas = document.getElementById('gl');
@@ -226,26 +284,26 @@ if (!gl) {
 const TRAIL_N = 24;
 const RIPPLE_N = 10;
 
-/* ---------------- shaders ---------------- */
+/* ---------------- shared GLSL ---------------- */
 
 const VERT = `
 attribute vec2 aPos;
 void main() { gl_Position = vec4(aPos, 0.0, 1.0); }
 `;
 
-const FRAG = `
+const HEADER = `
 precision highp float;
-
 uniform vec2  uRes;
 uniform float uTime;
-uniform vec2  uMouse;       // aspect-corrected uv
-uniform vec2  uVel;         // smoothed pointer velocity
+uniform vec2  uMouse;
+uniform vec2  uVel;
 uniform float uZoom;
-uniform float uHue;         // scroll-driven hue offset
-uniform float uFlow;        // scroll-driven flow offset
-uniform float uCalm;        // 1 when idle, 0 when active
-uniform vec4  uTrail[${TRAIL_N}];   // xy, age, strength
-uniform vec4  uRipples[${RIPPLE_N}]; // xy, birth time, strength
+uniform float uHue;
+uniform float uFlow;
+uniform float uCalm;
+uniform float uFade;
+uniform vec4  uTrail[${TRAIL_N}];
+uniform vec4  uRipples[${RIPPLE_N}];
 
 #define PI 3.14159265
 
@@ -261,41 +319,34 @@ float noise(vec2 p){
   vec2 i = floor(p), f = fract(p);
   vec2 u = f*f*(3.0-2.0*f);
   return mix(
-    mix(hash(i), hash(i+vec2(1,0)), u.x),
-    mix(hash(i+vec2(0,1)), hash(i+vec2(1,1)), u.x), u.y);
+    mix(hash(i), hash(i+vec2(1.0,0.0)), u.x),
+    mix(hash(i+vec2(0.0,1.0)), hash(i+vec2(1.0,1.0)), u.x), u.y);
 }
 
 float fbm(vec2 p){
   float v = 0.0, a = 0.5;
   mat2 m = rot(0.5);
-  for(int i=0;i<5;i++){
-    v += a * noise(p);
-    p = m * p * 2.02;
-    a *= 0.5;
-  }
+  for(int i=0;i<5;i++){ v += a * noise(p); p = m * p * 2.02; a *= 0.5; }
   return v;
 }
 
-/* luxury cosine palette: deep ink -> teal -> violet -> champagne gold */
-vec3 palette(float t){
-  vec3 a = vec3(0.36, 0.32, 0.38);
-  vec3 b = vec3(0.42, 0.36, 0.40);
-  vec3 c = vec3(1.00, 1.00, 1.00);
-  vec3 d = vec3(0.00, 0.18, 0.42);
+float fbm3(vec2 p){
+  float v = 0.0, a = 0.5;
+  mat2 m = rot(0.5);
+  for(int i=0;i<3;i++){ v += a * noise(p); p = m * p * 2.03; a *= 0.5; }
+  return v;
+}
+
+vec3 cpal(float t, vec3 a, vec3 b, vec3 c, vec3 d){
   return a + b * cos(2.0*PI*(c*t + d));
 }
 
-void main(){
-  vec2 frag = gl_FragCoord.xy / uRes;
-  vec2 uv = (gl_FragCoord.xy - 0.5*uRes) / min(uRes.x, uRes.y); // centered, aspect-safe
-  uv /= uZoom;
+vec2 baseUV(){
+  return (gl_FragCoord.xy - 0.5*uRes) / min(uRes.x, uRes.y) / uZoom;
+}
 
-  vec2 m = uMouse;          // same space as uv
-  float t = uTime * 0.12;
-
-  /* ---- ripples: radial displacement waves ---- */
+vec2 rippleDisp(vec2 uv, inout float glow){
   vec2 disp = vec2(0.0);
-  float rippleGlow = 0.0;
   for(int i=0;i<${RIPPLE_N};i++){
     vec4 R = uRipples[i];
     if(R.w <= 0.001) continue;
@@ -303,125 +354,584 @@ void main(){
     if(age < 0.0 || age > 3.5) continue;
     vec2 dir = uv - R.xy;
     float d = length(dir);
-    float radius = age * 0.55;
-    float band = d - radius;
+    float band = d - age * 0.55;
     float wave = sin(band * 60.0) * exp(-band*band*180.0) * exp(-age*1.4) * R.w;
     disp += normalize(dir + 1e-5) * wave * 0.035;
-    rippleGlow += exp(-band*band*420.0) * exp(-age*1.8) * R.w * 0.5;
+    glow += exp(-band*band*420.0) * exp(-age*1.8) * R.w * 0.5;
   }
+  return disp;
+}
 
-  /* ---- pointer swirl: rotate space around cursor ---- */
-  float speed = length(uVel);
-  vec2 toM = uv - m;
-  float dM = length(toM);
-  float swirlAmt = exp(-dM*dM*9.0) * clamp(speed*6.0, 0.0, 1.2) * 1.4;
-  uv = m + rot(swirlAmt) * toM;
-
-  /* gentle lens bulge under the cursor */
-  uv -= normalize(toM + 1e-5) * exp(-dM*dM*16.0) * 0.05;
-  uv += disp;
-
-  /* ---- trail: hot points dragged by the pointer ---- */
-  float trailGlow = 0.0;
-  vec2 trailPush = vec2(0.0);
+float trailGlowF(vec2 uv, inout vec2 push){
+  float g = 0.0;
   for(int i=0;i<${TRAIL_N};i++){
     vec4 T = uTrail[i];
     if(T.w <= 0.001) continue;
     float fade = exp(-T.z * 2.2) * T.w;
-    vec2 dt = uv - T.xy;
-    float dd = dot(dt, dt);
-    trailGlow += fade * exp(-dd * 110.0);
-    trailPush += normalize(dt + 1e-5) * fade * exp(-dd * 60.0) * 0.012;
+    vec2 d = uv - T.xy;
+    float dd = dot(d, d);
+    g += fade * exp(-dd * 110.0);
+    push += normalize(d + 1e-5) * fade * exp(-dd * 60.0) * 0.012;
   }
-  uv += trailPush;
+  return g;
+}
 
-  /* ---- domain-warped silk ---- */
-  vec2 p = uv * 2.6;
-  p = rot(uFlow * 0.25) * p;
-  float slow = t * (0.35 + 0.65 * uCalm);
-
-  vec2 q = vec2(
-    fbm(p + vec2(0.0, 0.0) + slow * vec2(0.7, 0.2)),
-    fbm(p + vec2(5.2, 1.3) - slow * vec2(0.3, 0.6))
-  );
-  vec2 r = vec2(
-    fbm(p + 3.2*q + vec2(1.7, 9.2) + slow*0.8),
-    fbm(p + 3.2*q + vec2(8.3, 2.8) - slow*0.5)
-  );
-  float f = fbm(p + 3.0*r);
-
-  /* sharpen into silk folds */
-  float folds = pow(f, 1.6);
-  float sheen = smoothstep(0.35, 0.95, fbm(p*1.7 + r*2.0 + slow));
-
-  float hueT = folds + 0.45*length(q) + uHue + uTime*0.012;
-  vec3 col = palette(hueT);
-
-  /* deep base so the dark areas read as ink, not mud */
-  vec3 ink = vec3(0.015, 0.016, 0.030);
-  col = mix(ink, col, smoothstep(0.08, 0.85, folds + 0.35*sheen));
-
-  /* champagne sheen along fold ridges */
-  vec3 gold = vec3(0.96, 0.82, 0.55);
-  col += gold * pow(sheen, 3.0) * 0.35;
-
-  /* pointer light + trail */
-  float cursorLight = exp(-dM*dM*7.0);
-  col += palette(hueT + 0.18) * cursorLight * (0.10 + speed*1.6);
-  col += gold * trailGlow * 0.55;
-  col += vec3(0.9, 0.95, 1.0) * rippleGlow;
-
-  /* subtle chromatic split, stronger near the pointer */
-  float ab = 0.012 * (cursorLight + 0.15);
-  col.r = mix(col.r, palette(hueT + ab).r, 0.5);
-  col.b = mix(col.b, palette(hueT - ab).b, 0.5);
-
-  /* vignette + grain */
+vec3 grade(vec3 col){
+  vec2 frag = gl_FragCoord.xy / uRes;
   float vig = smoothstep(1.35, 0.35, length((frag - 0.5) * vec2(uRes.x/uRes.y, 1.0)));
   col *= mix(0.55, 1.0, vig);
-  float grain = (hash(frag * uRes + fract(uTime)) - 0.5) * 0.055;
-  col += grain;
-
-  /* filmic-ish curve */
+  col += (hash(frag * uRes + fract(uTime)) - 0.5) * 0.05;
   col = col / (1.0 + col * 0.35);
-  col = pow(max(col, 0.0), vec3(0.92));
-
-  gl_FragColor = vec4(col, 1.0);
+  col = pow(max(col, vec3(0.0)), vec3(0.92));
+  return col * uFade;
 }
 `;
 
-function compile(type, src) {
+/* ---- scene 1 · Liquid Silk ---- */
+const S1 = `
+vec3 silkPal(float t){
+  return cpal(t, vec3(0.36,0.32,0.38), vec3(0.42,0.36,0.40), vec3(1.0), vec3(0.0,0.18,0.42));
+}
+void main(){
+  vec2 uv = baseUV();
+  float t = uTime * 0.12;
+  float rg = 0.0;
+  vec2 disp = rippleDisp(uv, rg);
+
+  float speed = length(uVel);
+  vec2 toM = uv - uMouse;
+  float dM = length(toM);
+  float swirl = exp(-dM*dM*9.0) * clamp(speed*6.0, 0.0, 1.2) * 1.4;
+  uv = uMouse + rot(swirl) * toM;
+  uv -= normalize(toM + 1e-5) * exp(-dM*dM*16.0) * 0.05;
+  uv += disp;
+
+  vec2 push = vec2(0.0);
+  float tg = trailGlowF(uv, push);
+  uv += push;
+
+  vec2 p = rot(uFlow * 0.25) * (uv * 2.6);
+  float slow = t * (0.35 + 0.65 * uCalm);
+  vec2 q = vec2(fbm(p + slow*vec2(0.7,0.2)), fbm(p + vec2(5.2,1.3) - slow*vec2(0.3,0.6)));
+  vec2 r = vec2(fbm(p + 3.2*q + vec2(1.7,9.2) + slow*0.8), fbm(p + 3.2*q + vec2(8.3,2.8) - slow*0.5));
+  float f = fbm(p + 3.0*r);
+
+  float folds = pow(f, 1.6);
+  float sheen = smoothstep(0.35, 0.95, fbm(p*1.7 + r*2.0 + slow));
+  float hueT = folds + 0.45*length(q) + uHue + uTime*0.012;
+  vec3 col = silkPal(hueT);
+  vec3 ink = vec3(0.015, 0.016, 0.030);
+  col = mix(ink, col, smoothstep(0.08, 0.85, folds + 0.35*sheen));
+  vec3 gold = vec3(0.96, 0.82, 0.55);
+  col += gold * pow(sheen, 3.0) * 0.35;
+
+  float cl = exp(-dM*dM*7.0);
+  col += silkPal(hueT + 0.18) * cl * (0.10 + speed*1.6);
+  col += gold * tg * 0.55;
+  col += vec3(0.9, 0.95, 1.0) * rg;
+
+  float ab = 0.012 * (cl + 0.15);
+  col.r = mix(col.r, silkPal(hueT + ab).r, 0.5);
+  col.b = mix(col.b, silkPal(hueT - ab).b, 0.5);
+
+  gl_FragColor = vec4(grade(col), 1.0);
+}
+`;
+
+/* ---- scene 2 · Molten Aurum — liquid gold lit by the cursor ---- */
+const S2 = `
+vec2 W;
+float hgt(vec2 p){ return fbm(p + W); }
+void main(){
+  vec2 uv = baseUV();
+  float rg = 0.0;
+  uv += rippleDisp(uv, rg);
+
+  vec2 toM = uv - uMouse;
+  float dM2 = dot(toM, toM);
+  uv += uVel * exp(-dM2*8.0) * 0.12;
+
+  vec2 push = vec2(0.0);
+  float tg = trailGlowF(uv, push);
+  uv += push * 1.5;
+
+  vec2 p = rot(uFlow * 0.2) * (uv * 2.3);
+  float t = uTime * (0.05 + 0.08 * uCalm);
+  W = 1.4 * vec2(fbm(p + t*0.5), fbm(p + 5.1 - t*0.4)) + vec2(t*0.55, -t*0.3);
+  float h = hgt(p);
+  vec2 e = vec2(0.02, 0.0);
+  vec3 n = normalize(vec3(hgt(p - e.xy) - hgt(p + e.xy), hgt(p - e.yx) - hgt(p + e.yx), 0.16));
+
+  vec3 fp = vec3(uv, 0.0);
+  vec3 lp = vec3(uMouse, 0.30);
+  vec3 L = lp - fp;
+  float lf = 1.0 / (1.0 + dot(L, L) * 4.0);
+  L = normalize(L);
+  float dif = max(dot(n, L), 0.0);
+  vec3 Hv = normalize(L + vec3(0.0, 0.0, 1.0));
+  float sp1 = pow(max(dot(n, Hv), 0.0), 120.0);
+  float sp2 = pow(max(dot(n, Hv), 0.0), 16.0);
+
+  vec3 tint = normalize(cpal(uHue, vec3(0.6), vec3(0.4), vec3(1.0), vec3(0.0,0.33,0.67))) * 1.7;
+  vec3 deep  = vec3(0.09, 0.045, 0.02) * tint;
+  vec3 amber = vec3(0.78, 0.42, 0.12) * tint;
+  vec3 gold  = vec3(1.0, 0.80, 0.38) * tint;
+
+  vec3 col = mix(deep, amber, smoothstep(0.15, 0.75, h));
+  col = mix(col, gold, smoothstep(0.55, 0.95, h) * 0.85);
+  col = col * (0.22 + dif * lf * 1.5) + gold * sp1 * lf * 2.6 + amber * sp2 * lf * 0.5;
+  col += gold * pow(smoothstep(0.6, 0.95, h), 4.0) * 0.18;
+  col += gold * tg * 0.6 + vec3(1.0, 0.95, 0.85) * rg;
+
+  gl_FragColor = vec4(grade(col), 1.0);
+}
+`;
+
+/* ---- scene 3 · Velvet Nebula — gas, stars & a gravity lens ---- */
+const S3 = `
+void main(){
+  vec2 uv = baseUV();
+  float rg = 0.0;
+  uv += rippleDisp(uv, rg);
+
+  vec2 toM = uv - uMouse;
+  float dM = length(toM);
+  uv -= toM / (dM*dM + 0.025) * 0.014;
+
+  vec2 push = vec2(0.0);
+  float tg = trailGlowF(uv, push);
+
+  vec3 col = vec3(0.012, 0.010, 0.022);
+  float t = uTime * (0.3 + 0.7 * uCalm);
+
+  for(int i=0;i<3;i++){
+    float fi = float(i);
+    vec2 p = rot(uFlow*0.15 + fi*1.9) * (uv * (1.5 + fi)) + uMouse * (0.18 + fi*0.16)
+           + vec2(t*0.014*(fi+1.0), -t*0.01);
+    float d = fbm(p + 1.6*vec2(fbm(p + t*0.02), fbm(p + 4.7 - t*0.015)));
+    vec3 gas = cpal(d + uHue + fi*0.16, vec3(0.44,0.30,0.52), vec3(0.42,0.34,0.44), vec3(1.0), vec3(0.72,0.42,0.12));
+    col += gas * pow(d, 1.9) * (1.15 - fi*0.28);
+  }
+
+  for(int i=0;i<2;i++){
+    float fi = float(i);
+    vec2 sp = (uv + uMouse*(0.10 + fi*0.22)) * (7.0 + fi*9.0);
+    vec2 cell = floor(sp), f = fract(sp);
+    float rnd = hash(cell + fi*13.7);
+    vec2 spos = vec2(hash(cell + 1.3), hash(cell + 2.7));
+    float sd = length(f - spos);
+    float tw = 0.55 + 0.45*sin(uTime*(1.5 + rnd*5.0) + rnd*40.0);
+    col += vec3(0.85, 0.9, 1.0) * step(0.93, rnd) * exp(-sd*sd*600.0) * tw * 0.9;
+  }
+
+  col += vec3(0.55, 0.4, 0.9) * exp(-dM*dM*5.0) * 0.18;
+  col += vec3(0.95, 0.85, 0.65) * tg * 0.5;
+  col += vec3(0.8, 0.85, 1.0) * rg;
+
+  gl_FragColor = vec4(grade(col), 1.0);
+}
+`;
+
+/* ---- scene 4 · Crystal Prism — faceted glass kaleidoscope ---- */
+const S4 = `
+vec3 vor(vec2 p){
+  vec2 ip = floor(p), fp = fract(p);
+  float f1 = 8.0, f2 = 8.0, idh = 0.0;
+  for(int j=-1;j<=1;j++)
+  for(int i=-1;i<=1;i++){
+    vec2 g = vec2(float(i), float(j));
+    float h1 = hash(ip + g);
+    vec2 o = vec2(h1, hash(ip + g + 7.7));
+    o = 0.5 + 0.42*sin(uTime*0.35 + 6.2831*o);
+    float d = length(g + o - fp);
+    if(d < f1){ f2 = f1; f1 = d; idh = h1; }
+    else if(d < f2){ f2 = d; }
+  }
+  return vec3(f1, f2, idh);
+}
+void main(){
+  vec2 uv = baseUV();
+  float rg = 0.0;
+  uv += rippleDisp(uv, rg) * 1.5;
+
+  vec2 toM = uv - uMouse;
+  float dM2 = dot(toM, toM);
+  float light = 0.45 + 1.6*exp(-dM2*4.0);
+
+  float ang = atan(uv.y, uv.x) + uFlow*0.4 + uTime*0.04 + uVel.x*0.2;
+  float seg = PI / 4.0;
+  ang = abs(mod(ang, seg*2.0) - seg);
+  float rad = length(uv);
+  vec2 p = vec2(cos(ang), sin(ang)) * rad * 3.2 + uMouse*0.5;
+
+  vec3 v = vor(p);
+  float gap = v.y - v.x;
+  float edge  = smoothstep(0.10, 0.005, gap);
+  float edgeR = smoothstep(0.16, 0.02, gap);
+  float edgeB = smoothstep(0.07, 0.0, gap);
+
+  vec3 rainbow = cpal(v.z*0.9 + rad*0.8 + uHue + uTime*0.03, vec3(0.5), vec3(0.5), vec3(1.0), vec3(0.0,0.33,0.67));
+  vec3 col = mix(vec3(0.02,0.025,0.05), vec3(0.05,0.06,0.10), smoothstep(1.0,0.0,rad));
+
+  float fill = pow(1.0 - clamp(v.x, 0.0, 1.0), 3.0);
+  col += rainbow * fill * (0.30 + 0.45*light);
+  col += (vec3(edgeR, edge, edgeB)*0.7 + vec3(1.0)*edge*0.5) * mix(vec3(1.0), rainbow, 0.4) * light;
+
+  float glint = pow(0.5 + 0.5*sin(v.z*40.0 + uTime*1.2), 24.0);
+  col += vec3(1.0, 0.98, 0.9) * glint * fill * light * 1.4;
+
+  float am = atan(toM.y, toM.x);
+  float rays = pow(abs(cos(am*3.0 + uTime*0.2)), 24.0) * exp(-dM2*3.5);
+  col += vec3(1.0, 0.97, 0.9) * rays * 0.7;
+  col += vec3(1.0, 0.98, 0.92) * exp(-dM2*14.0) * 0.5;
+
+  vec2 cell = floor(uv*30.0);
+  float s = hash(cell);
+  float tw = pow(0.5 + 0.5*sin(uTime*4.0 + s*60.0), 14.0);
+  col += vec3(1.0) * step(0.972, s) * tw * light;
+
+  col += vec3(1.0) * rg;
+  gl_FragColor = vec4(grade(col), 1.0);
+}
+`;
+
+/* ---- scene 5 · Smoke Noir — volumetric light shafts ---- */
+const S5 = `
+float dens(vec2 p){
+  return fbm3(p*1.9 + vec2(uTime*0.05, uTime*0.018) + vec2(fbm3(p*2.2 - uTime*0.03))*0.8);
+}
+void main(){
+  vec2 uv = baseUV();
+  float rg = 0.0;
+  uv += rippleDisp(uv, rg);
+
+  vec2 toM = uv - uMouse;
+  float dM = length(toM);
+  uv += uVel * exp(-dM*dM*6.0) * 0.18;
+
+  vec2 push = vec2(0.0);
+  float tg = trailGlowF(uv, push);
+  uv += push * 2.0;
+
+  float d0 = dens(uv) + fbm(uv*4.0 + uTime*0.03) * 0.35;
+
+  float sh = 0.0;
+  vec2 stepv = (uMouse - uv) / 14.0;
+  vec2 sp = uv;
+  for(int i=0;i<14;i++){ sp += stepv; sh += dens(sp); }
+  sh /= 14.0;
+
+  float beam = exp(-dM*1.4) * exp(-sh*2.4) * 2.2;
+  vec3 warm = mix(vec3(1.0,0.93,0.80), cpal(uHue, vec3(0.7), vec3(0.3), vec3(1.0), vec3(0.0,0.33,0.67)), 0.35);
+
+  vec3 col = vec3(0.085, 0.088, 0.10) * (0.55 + d0*1.3);
+  col += warm * beam * (0.25 + d0*1.5);
+  col += warm * exp(-dM*dM*30.0) * 1.2;
+
+  /* cold moonlight from the upper third keeps the smoke readable when idle */
+  vec2 toMoon = uv - vec2(0.0, 0.42);
+  float moon = exp(-dot(toMoon, toMoon) * 1.6);
+  col += vec3(0.55, 0.62, 0.75) * moon * (0.18 + d0*0.55);
+
+  col += vec3(1.0) * tg * 0.25;
+  col += vec3(1.0, 0.97, 0.9) * rg * 0.8;
+
+  float lum = dot(col, vec3(0.299, 0.587, 0.114));
+  col = mix(vec3(lum), col, 0.45);
+
+  gl_FragColor = vec4(grade(col), 1.0);
+}
+`;
+
+/* ---- scene 6 · Obsidian Bloom — magnetic black liquid ---- */
+const S6 = `
+float fieldF(vec2 uv){
+  vec2 toM = uv - uMouse;
+  float d2 = dot(toM, toM);
+  float f = exp(-d2*30.0) * 1.25;
+  float a = atan(toM.y, toM.x);
+  f += exp(-d2*16.0) * pow(abs(sin(a*9.0 + uFlow*2.0 + uTime*0.5)), 10.0) * 0.55;
+  for(int i=0;i<${TRAIL_N};i++){
+    vec4 T = uTrail[i];
+    if(T.w <= 0.001) continue;
+    float fade = exp(-T.z*2.0) * T.w;
+    vec2 d = uv - T.xy;
+    f += fade * exp(-dot(d,d)*90.0) * 0.75;
+  }
+  f += fbm3(uv*3.0 + uTime*0.08) * 0.22;
+  /* micro-ripples give the surface something to reflect */
+  f += noise(uv*22.0 + uTime*0.3) * 0.035;
+  return f;
+}
+void main(){
+  vec2 uv = baseUV();
+  float rg = 0.0;
+  uv += rippleDisp(uv, rg) * 2.0;
+
+  float f = fieldF(uv);
+  vec2 e = vec2(0.007, 0.0);
+  vec3 n = normalize(vec3(fieldF(uv - e.xy) - fieldF(uv + e.xy),
+                          fieldF(uv - e.yx) - fieldF(uv + e.yx), 0.030));
+  float surf = smoothstep(0.42, 0.49, f);
+
+  /* deep blue-violet accent that rotates with the hue scroll */
+  vec3 tint = cpal(uHue + 0.55, vec3(0.55,0.5,0.65), vec3(0.45,0.4,0.5), vec3(1.0), vec3(0.0,0.15,0.35));
+
+  /* glossy black liquid: sky reflection + two hard speculars + fresnel rim */
+  vec3 env = mix(vec3(0.015, 0.015, 0.022), vec3(0.30, 0.33, 0.42), pow(0.5 + 0.5*n.y, 3.0));
+  vec3 L1 = normalize(vec3(0.45, 0.65, 0.55));
+  vec3 L2 = normalize(vec3(-0.55, -0.35, 0.45));
+  float sp1 = pow(max(dot(n, L1), 0.0), 80.0);
+  float sp2 = pow(max(dot(n, L2), 0.0), 30.0);
+  float fres = pow(1.0 - max(n.z, 0.0), 3.0);
+
+  vec3 liquid = env * 0.55
+              + vec3(1.0) * sp1 * 2.4
+              + tint * sp2 * 0.8
+              + tint * fres * 0.9;
+
+  float vt = fbm3(uv*3.0 + uTime*0.02);
+  vec3 bg = vec3(0.040, 0.034, 0.052) * (0.55 + vt*0.8);
+  vec2 toM = uv - uMouse;
+  bg += tint * exp(-dot(toM,toM)*2.5) * 0.06;
+
+  vec3 col = mix(bg, liquid, surf);
+  /* thin rim light hugging the silhouette */
+  float rim = smoothstep(0.36, 0.42, f) * (1.0 - surf);
+  col += tint * rim * 0.85;
+  col += vec3(0.9, 0.95, 1.0) * rg;
+
+  gl_FragColor = vec4(grade(col), 1.0);
+}
+`;
+
+/* ---- scene 7 · Opal Mirage — thin-film iridescence ---- */
+const S7 = `
+void main(){
+  vec2 uv = baseUV();
+  float rg = 0.0;
+  uv += rippleDisp(uv, rg);
+
+  vec2 toM = uv - uMouse;
+  float dM2 = dot(toM, toM);
+
+  vec2 push = vec2(0.0);
+  float tg = trailGlowF(uv, push);
+  uv += push;
+
+  float t = uTime * (0.25 + 0.75 * uCalm);
+  float heat = exp(-dM2*6.0) * 0.6 + tg * 0.5;
+  uv.x += sin(uv.y*34.0 + t*2.6) * 0.0035 * (0.4 + heat*2.0);
+
+  vec2 p = rot(uFlow * 0.18) * (uv * 2.0);
+  float h = fbm(p + vec2(0.0, -t*0.06) + 1.3*vec2(fbm(p + t*0.04), fbm(p + 3.3)));
+  h += heat * 0.5;
+
+  /* mother-of-pearl: bright nacre base with soft pastel interference sheets */
+  float band = h * 5.5 + uHue * 2.0;
+  vec3 irid = vec3(0.5 + 0.5*cos(band), 0.5 + 0.5*cos(band + 2.1), 0.5 + 0.5*cos(band + 4.2));
+  irid = mix(vec3(dot(irid, vec3(0.3333))), irid, 0.6);
+
+  float pearl = smoothstep(0.15, 0.85, h);
+  vec3 base = mix(vec3(0.74, 0.72, 0.78), vec3(0.97, 0.95, 0.93), pearl);
+  vec3 col = base * (0.80 + 0.20 * pearl);
+  col = mix(col, irid, 0.30 + 0.14 * pearl);
+
+  float sheen = pow(smoothstep(0.4, 0.95, fbm(p*1.4 - h*1.5 + t*0.05)), 3.0);
+  col += vec3(1.0, 0.97, 0.92) * sheen * 0.3;
+  col += vec3(1.0) * exp(-dM2*16.0) * 0.18;
+  col += vec3(1.0) * rg * 0.7;
+
+  gl_FragColor = vec4(grade(col), 1.0);
+}
+`;
+
+/* ---- scene 8 · Solar Eclipse — corona, lensing & the diamond ring ---- */
+const S8 = `
+void main(){
+  vec2 uv = baseUV();
+  float rg = 0.0;
+  uv += rippleDisp(uv, rg);
+
+  vec2 toM = uv - uMouse;
+  float dM = length(toM);
+  uv -= toM / (dM*dM + 0.03) * 0.010;
+
+  float d = length(uv);
+  vec2 dir = uv / max(d, 1e-4);
+  float t = uTime * (0.4 + 0.6 * uCalm);
+
+  vec2 md = uMouse;
+  float ml = length(md);
+  if(ml > 0.001){ md /= ml; } else { md = vec2(1.0, 0.0); }
+
+  float fl  = fbm(uv*2.8 - dir*t*0.22);
+  float fl2 = fbm(uv*5.0 - dir*t*0.4 + 3.7);
+  float R = 0.30;
+  float coro = exp(-(d - R)*4.2) * step(R, d);
+  float bias = 1.0 + 1.4*max(dot(dir, md), 0.0)*min(ml*2.0, 1.0);
+  bias *= 1.0 + min(length(uVel), 1.0)*0.5;
+
+  vec3 gold = vec3(1.0, 0.85, 0.55);
+  vec3 white = vec3(1.0, 0.97, 0.9);
+  vec3 col = vec3(0.008, 0.008, 0.014);
+
+  vec2 sp = uv * 9.0;
+  vec2 cell = floor(sp), fr = fract(sp);
+  float rnd = hash(cell);
+  vec2 spos = vec2(hash(cell + 1.3), hash(cell + 2.7));
+  float sd = length(fr - spos);
+  col += vec3(0.8, 0.85, 1.0) * step(0.94, rnd) * exp(-sd*sd*500.0)
+       * (0.5 + 0.5*sin(uTime*2.0 + rnd*30.0)) * 0.6;
+
+  vec3 ctint = cpal(uHue, vec3(0.6,0.5,0.4), vec3(0.4,0.35,0.3), vec3(1.0), vec3(0.0,0.1,0.25));
+  col += ctint * coro * (0.5 + fl*1.5) * bias * 0.9;
+  col += white * coro * coro * (0.3 + fl2*1.2) * bias * 0.5;
+
+  float prom = exp(-abs(d - R)*14.0) * pow(fl2, 3.0);
+  col += vec3(1.0, 0.35, 0.15) * prom * 1.2;
+
+  float spark = pow(max(dot(dir, md), 0.0), 60.0) * exp(-abs(d - R)*18.0);
+  col += white * spark * 3.0 * min(ml*2.5, 1.0);
+
+  float disc = smoothstep(R + 0.004, R - 0.004, d);
+  col = mix(col, vec3(0.0), disc);
+  col += gold * exp(-abs(d - R)*60.0) * 0.8;
+  col += white * rg;
+
+  gl_FragColor = vec4(grade(col), 1.0);
+}
+`;
+
+/* ---- scene 9 · Stellar Dust — background for the particle field ---- */
+const S9BG = `
+void main(){
+  vec2 uv = baseUV();
+  float rg = 0.0;
+  uv += rippleDisp(uv, rg);
+
+  float t = uTime * 0.05;
+  float haze = fbm3(uv*1.8 + t)*0.5 + fbm3(uv*0.7 - t*0.6)*0.5;
+  vec3 tint = cpal(uHue + 0.55, vec3(0.4,0.35,0.5), vec3(0.35,0.3,0.4), vec3(1.0), vec3(0.7,0.4,0.1));
+
+  vec3 col = vec3(0.012, 0.012, 0.02) + tint * pow(haze, 3.0) * 0.25;
+  vec2 toM = uv - uMouse;
+  col += tint * exp(-dot(toM,toM)*4.0) * 0.10;
+  col += vec3(0.9, 0.95, 1.0) * rg * 0.6;
+
+  gl_FragColor = vec4(grade(col), 1.0);
+}
+`;
+
+/* ---- particle pipeline (scene 9) ---- */
+const PVERT = `
+attribute vec2 aP;
+attribute vec2 aV;
+uniform vec2 uRes;
+uniform float uZoom;
+uniform float uHue;
+varying vec3 vCol;
+varying float vA;
+vec3 cpal(float t, vec3 a, vec3 b, vec3 c, vec3 d){
+  return a + b * cos(6.2831853*(c*t + d));
+}
+void main(){
+  float minR = min(uRes.x, uRes.y);
+  vec2 clip = aP * uZoom * 2.0 * minR / uRes;
+  float sp = length(aV);
+  float t = clamp(sp * 1.6, 0.0, 1.0);
+  vCol = cpal(t*0.55 + uHue + 0.05, vec3(0.55,0.45,0.5), vec3(0.45,0.4,0.45), vec3(1.0), vec3(0.6,0.25,0.0));
+  vA = 0.45 + 0.55 * t;
+  gl_Position = vec4(clip, 0.0, 1.0);
+  gl_PointSize = (1.5 + t*4.5) * (uRes.y / 800.0);
+}
+`;
+const PFRAG = `
+precision mediump float;
+varying vec3 vCol;
+varying float vA;
+uniform float uFade;
+void main(){
+  vec2 d = gl_PointCoord - 0.5;
+  float r = dot(d, d) * 4.0;
+  float a = exp(-r * 3.5) * vA * uFade;
+  gl_FragColor = vec4(vCol * a, a);
+}
+`;
+
+/* ---------------- compile ---------------- */
+
+function compile(type, src, tag) {
   const sh = gl.createShader(type);
   gl.shaderSource(sh, src);
   gl.compileShader(sh);
   if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
-    throw new Error(gl.getShaderInfoLog(sh));
+    throw new Error(tag + ': ' + gl.getShaderInfoLog(sh));
   }
   return sh;
 }
 
-const prog = gl.createProgram();
-gl.attachShader(prog, compile(gl.VERTEX_SHADER, VERT));
-gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, FRAG));
-gl.linkProgram(prog);
-if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
-gl.useProgram(prog);
+function makeProgram(vsrc, fsrc, tag, attribs) {
+  const prog = gl.createProgram();
+  gl.attachShader(prog, compile(gl.VERTEX_SHADER, vsrc, tag + '/vert'));
+  gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, fsrc, tag + '/frag'));
+  attribs.forEach(([name, loc]) => gl.bindAttribLocation(prog, loc, name));
+  gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+    throw new Error(tag + ': ' + gl.getProgramInfoLog(prog));
+  }
+  const U = {};
+  ['uRes','uTime','uMouse','uVel','uZoom','uHue','uFlow','uCalm','uFade','uTrail','uRipples']
+    .forEach(n => U[n] = gl.getUniformLocation(prog, n));
+  return { prog, U };
+}
 
-const buf = gl.createBuffer();
-gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+const SCENES = [
+  { name: 'Liquid Silk',    tag: 'flowing ink & gold',        frag: S1 },
+  { name: 'Molten Aurum',   tag: 'liquid gold · cursor light', frag: S2 },
+  { name: 'Velvet Nebula',  tag: 'gas, stars & gravity',       frag: S3 },
+  { name: 'Crystal Prism',  tag: 'refraction kaleidoscope',    frag: S4 },
+  { name: 'Smoke Noir',     tag: 'volumetric light shafts',    frag: S5 },
+  { name: 'Obsidian Bloom', tag: 'magnetic black liquid',      frag: S6 },
+  { name: 'Opal Mirage',    tag: 'thin-film iridescence',      frag: S7 },
+  { name: 'Solar Eclipse',  tag: 'corona & lensing',           frag: S8 },
+  { name: 'Stellar Dust',   tag: 'three thousand particles',   frag: S9BG, particles: true },
+];
+
+SCENES.forEach((s, i) => { s.gl = makeProgram(VERT, HEADER + s.frag, 'scene' + (i+1), [['aPos', 0]]); });
+const PPROG = makeProgram(PVERT, PFRAG, 'particles', [['aP', 0], ['aV', 1]]);
+
+/* fullscreen triangle */
+const quadBuf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
 gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
-const aPos = gl.getAttribLocation(prog, 'aPos');
-gl.enableVertexAttribArray(aPos);
-gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
 
-const U = {};
-['uRes','uTime','uMouse','uVel','uZoom','uHue','uFlow','uCalm','uTrail','uRipples']
-  .forEach(n => U[n] = gl.getUniformLocation(prog, n));
+/* particle buffers */
+const PN = 3000;
+const pPos = new Float32Array(PN * 2);
+const pVel = new Float32Array(PN * 2);
+for (let i = 0; i < PN; i++) {
+  const a = Math.random() * Math.PI * 2;
+  const r = 0.15 + Math.sqrt(Math.random()) * 0.55;
+  pPos[i*2]   = Math.cos(a) * r;
+  pPos[i*2+1] = Math.sin(a) * r;
+  pVel[i*2]   = (Math.random() - 0.5) * 0.05;
+  pVel[i*2+1] = (Math.random() - 0.5) * 0.05;
+}
+const pPosBuf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, pPosBuf);
+gl.bufferData(gl.ARRAY_BUFFER, pPos, gl.DYNAMIC_DRAW);
+const pVelBuf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, pVelBuf);
+gl.bufferData(gl.ARRAY_BUFFER, pVel, gl.DYNAMIC_DRAW);
 
 /* ---------------- state ---------------- */
 
 const state = {
-  mouse: { x: 0, y: 0 },        // aspect-corrected uv space
+  scene: 0,
+  pending: null,
+  fade: 0, fadeTarget: 1,
+  mouse: { x: 0, y: 0 },
   rawMouse: { x: innerWidth/2, y: innerHeight/2 },
   vel: { x: 0, y: 0 },
   smoothVel: { x: 0, y: 0 },
@@ -445,6 +955,55 @@ function toUV(px, py) {
   };
 }
 
+/* ---------------- scene switching ---------------- */
+
+const hero = document.getElementById('hero');
+const heroTitle = document.getElementById('heroTitle');
+const heroTag = document.getElementById('heroTag');
+const sceneNoEl = document.getElementById('sceneNo');
+const rail = document.getElementById('rail');
+let heroTimer = null;
+
+SCENES.forEach((s, i) => {
+  const b = document.createElement('button');
+  b.innerHTML = `<span class="num">0${i+1}</span><span class="nm">${s.name}</span>`;
+  b.addEventListener('click', () => switchScene(i));
+  rail.appendChild(b);
+});
+const railBtns = [...rail.children];
+
+function showHero(i) {
+  const def = SCENES[i];
+  const words = def.name.split(' ');
+  heroTitle.innerHTML = words.length > 1
+    ? `${words[0]}<br><b>${words.slice(1).join(' ')}</b>`
+    : `<b>${def.name}</b>`;
+  heroTag.textContent = def.tag;
+  hero.classList.remove('hidden');
+  clearTimeout(heroTimer);
+  heroTimer = setTimeout(() => hero.classList.add('hidden'), 2600);
+}
+
+function applySceneUI(i) {
+  sceneNoEl.textContent = '0' + (i + 1);
+  railBtns.forEach((b, j) => b.classList.toggle('active', j === i));
+  showHero(i);
+}
+
+function switchScene(i) {
+  if (i === state.scene && state.pending === null) return;
+  state.pending = i;
+  state.fadeTarget = 0;
+}
+window.switchScene = switchScene;
+
+window.addEventListener('keydown', (e) => {
+  const n = parseInt(e.key, 10);
+  if (n >= 1 && n <= 9) switchScene(n - 1);
+});
+
+applySceneUI(0);
+
 /* ---------------- pointer ---------------- */
 
 const cursorDot = document.getElementById('cursorDot');
@@ -452,7 +1011,6 @@ const cursorRing = document.getElementById('cursorRing');
 const coordsEl = document.getElementById('coords');
 const zoomEl = document.getElementById('zoomVal');
 const hueEl = document.getElementById('hueVal');
-const hero = document.getElementById('hero');
 
 let lastPointerT = performance.now();
 let trailAccum = 0;
@@ -471,7 +1029,6 @@ window.addEventListener('pointermove', (e) => {
   state.vel.y = -(e.clientY - prev.y) / s / dt;
   state.lastMove = now;
 
-  // drop trail samples by distance travelled, not by event count
   trailAccum += Math.hypot(e.clientX - prev.x, e.clientY - prev.y);
   if (trailAccum > 14) {
     trailAccum = 0;
@@ -479,7 +1036,7 @@ window.addEventListener('pointermove', (e) => {
     const i = state.trailHead * 4;
     state.trail[i] = uv.x;
     state.trail[i+1] = uv.y;
-    state.trail[i+2] = 0; // age
+    state.trail[i+2] = 0;
     state.trail[i+3] = Math.min(0.25 + Math.hypot(state.vel.x, state.vel.y) * 0.35, 1.0);
     state.trailHead = (state.trailHead + 1) % TRAIL_N;
   }
@@ -505,7 +1062,6 @@ window.addEventListener('pointerup', () => {
   cursorRing.style.margin = '-21px 0 0 -21px';
 });
 window.addEventListener('dblclick', (e) => {
-  // burst: three staggered rings + hue kick
   spawnRipple(e.clientX, e.clientY, 1.4);
   setTimeout(() => spawnRipple(e.clientX, e.clientY, 1.0), 90);
   setTimeout(() => spawnRipple(e.clientX, e.clientY, 0.7), 200);
@@ -517,17 +1073,14 @@ window.addEventListener('dblclick', (e) => {
 window.addEventListener('wheel', (e) => {
   e.preventDefault();
   if (e.ctrlKey) {
-    // Chrome/Edge/Firefox report trackpad pinch as ctrl+wheel
     state.zoomTarget *= Math.exp(-e.deltaY * 0.0035);
   } else {
-    // two-finger scroll: vertical -> hue drift, horizontal -> flow rotation
     state.hueTarget += e.deltaY * 0.0006;
     state.flowTarget += e.deltaX * 0.0012;
   }
   state.zoomTarget = Math.min(Math.max(state.zoomTarget, 0.55), 3.2);
 }, { passive: false });
 
-/* Safari trackpad pinch */
 window.addEventListener('gesturestart', (e) => {
   e.preventDefault();
   state.gestureStartZoom = state.zoomTarget;
@@ -549,6 +1102,69 @@ function resize() {
 window.addEventListener('resize', resize);
 resize();
 
+/* ---------------- particle physics ---------------- */
+
+function simParticles(dt) {
+  /* when idle the attractor drifts back to center, so the swarm keeps orbiting on screen */
+  const c = state.calm * 0.8;
+  const mx = state.mouse.x * (1 - c), my = state.mouse.y * (1 - c);
+  const swirl = Math.max(-2.2, Math.min(2.2, 0.9 + state.flow * 0.8));
+  const damp = Math.exp(-dt * 1.1);
+  const vx0 = state.smoothVel.x * 0.6, vy0 = state.smoothVel.y * 0.6;
+  const t = timeNow;
+
+  for (let i = 0; i < PN; i++) {
+    const ix = i * 2, iy = ix + 1;
+    let px = pPos[ix], py = pPos[iy];
+    let vx = pVel[ix], vy = pVel[iy];
+
+    /* attraction to cursor + tangential swirl */
+    const dx = mx - px, dy = my - py;
+    const d2 = dx*dx + dy*dy + 0.01;
+    const f = 0.14 * Math.min(1 / d2, 26);
+    vx += (dx * f - dy * f * swirl) * dt;
+    vy += (dy * f + dx * f * swirl) * dt;
+
+    /* pointer velocity stirs nearby dust */
+    const near = Math.exp(-d2 * 10);
+    vx += vx0 * near * dt * 8;
+    vy += vy0 * near * dt * 8;
+
+    /* gentle curl-ish drift */
+    vx += Math.sin(py * 3.1 + t * 0.7) * 0.05 * dt;
+    vy += Math.cos(px * 2.7 - t * 0.5) * 0.05 * dt;
+
+    /* weak spring to center keeps the cloud on screen */
+    vx -= px * 0.06 * dt;
+    vy -= py * 0.06 * dt;
+
+    /* ripple shockwaves push the dust outward */
+    for (let r = 0; r < RIPPLE_N; r++) {
+      const rw = state.ripples[r*4+3];
+      if (rw <= 0.001) continue;
+      const age = timeNow - state.ripples[r*4+2];
+      if (age < 0 || age > 1.2) continue;
+      const rx = px - state.ripples[r*4], ry = py - state.ripples[r*4+1];
+      const rd = Math.sqrt(rx*rx + ry*ry) + 1e-5;
+      const band = rd - age * 0.55;
+      const push = Math.exp(-band * band * 60) * rw * 2.5 * dt;
+      vx += (rx / rd) * push;
+      vy += (ry / rd) * push;
+    }
+
+    vx *= damp; vy *= damp;
+    px += vx * dt; py += vy * dt;
+
+    pPos[ix] = px; pPos[iy] = py;
+    pVel[ix] = vx; pVel[iy] = vy;
+  }
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, pPosBuf);
+  gl.bufferSubData(gl.ARRAY_BUFFER, 0, pPos);
+  gl.bindBuffer(gl.ARRAY_BUFFER, pVelBuf);
+  gl.bufferSubData(gl.ARRAY_BUFFER, 0, pVel);
+}
+
 /* ---------------- render loop ---------------- */
 
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -558,33 +1174,7 @@ let lastFrame = t0;
 let cursorX = innerWidth/2, cursorY = innerHeight/2;
 let ringX = cursorX, ringY = cursorY;
 
-function frame(now) {
-  const dt = Math.min((now - lastFrame) / 1000, 0.05);
-  lastFrame = now;
-  timeNow = (now - t0) / 1000 * (reduceMotion ? 0.3 : 1);
-
-  // smoothing
-  const k = 1 - Math.exp(-dt * 10);
-  state.zoom += (state.zoomTarget - state.zoom) * k;
-  state.hue  += (state.hueTarget - state.hue) * k * 0.6;
-  state.flow += (state.flowTarget - state.flow) * k * 0.6;
-  state.smoothVel.x += (state.vel.x - state.smoothVel.x) * k;
-  state.smoothVel.y += (state.vel.y - state.smoothVel.y) * k;
-
-  // decay raw velocity so it doesn't stick after the pointer stops
-  state.vel.x *= Math.exp(-dt * 6);
-  state.vel.y *= Math.exp(-dt * 6);
-
-  const idle = (now - state.lastMove) > 1600;
-  state.calm += ((idle ? 1 : 0) - state.calm) * (1 - Math.exp(-dt * 2));
-
-  // age trail
-  for (let i = 0; i < TRAIL_N; i++) state.trail[i*4+2] += dt;
-
-  const uv = toUV(state.rawMouse.x, state.rawMouse.y);
-  state.mouse.x = uv.x;
-  state.mouse.y = uv.y;
-
+function setCommonUniforms(U) {
   gl.uniform2f(U.uRes, canvas.width, canvas.height);
   gl.uniform1f(U.uTime, timeNow);
   gl.uniform2f(U.uMouse, state.mouse.x, state.mouse.y);
@@ -593,9 +1183,71 @@ function frame(now) {
   gl.uniform1f(U.uHue, state.hue);
   gl.uniform1f(U.uFlow, state.flow);
   gl.uniform1f(U.uCalm, state.calm);
-  gl.uniform4fv(U.uTrail, state.trail);
-  gl.uniform4fv(U.uRipples, state.ripples);
+  gl.uniform1f(U.uFade, state.fade);
+  if (U.uTrail) gl.uniform4fv(U.uTrail, state.trail);
+  if (U.uRipples) gl.uniform4fv(U.uRipples, state.ripples);
+}
+
+function frame(now) {
+  const dt = Math.min((now - lastFrame) / 1000, 0.05);
+  lastFrame = now;
+  timeNow = (now - t0) / 1000 * (reduceMotion ? 0.3 : 1);
+
+  const k = 1 - Math.exp(-dt * 10);
+  state.zoom += (state.zoomTarget - state.zoom) * k;
+  state.hue  += (state.hueTarget - state.hue) * k * 0.6;
+  state.flow += (state.flowTarget - state.flow) * k * 0.6;
+  state.smoothVel.x += (state.vel.x - state.smoothVel.x) * k;
+  state.smoothVel.y += (state.vel.y - state.smoothVel.y) * k;
+  state.vel.x *= Math.exp(-dt * 6);
+  state.vel.y *= Math.exp(-dt * 6);
+
+  /* scene crossfade: dip to black, swap, rise */
+  const fk = 1 - Math.exp(-dt * (state.fadeTarget === 0 ? 14 : 5));
+  state.fade += (state.fadeTarget - state.fade) * fk;
+  if (state.pending !== null && state.fade < 0.04) {
+    state.scene = state.pending;
+    state.pending = null;
+    state.fadeTarget = 1;
+    applySceneUI(state.scene);
+  }
+
+  const idle = (now - state.lastMove) > 1600;
+  state.calm += ((idle ? 1 : 0) - state.calm) * (1 - Math.exp(-dt * 2));
+
+  for (let i = 0; i < TRAIL_N; i++) state.trail[i*4+2] += dt;
+
+  const uv = toUV(state.rawMouse.x, state.rawMouse.y);
+  state.mouse.x = uv.x;
+  state.mouse.y = uv.y;
+
+  const def = SCENES[state.scene];
+
+  /* background / scene pass */
+  gl.useProgram(def.gl.prog);
+  setCommonUniforms(def.gl.U);
+  gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+  gl.disableVertexAttribArray(1);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+  /* particle pass */
+  if (def.particles) {
+    simParticles(dt);
+    gl.useProgram(PPROG.prog);
+    setCommonUniforms(PPROG.U);
+    gl.bindBuffer(gl.ARRAY_BUFFER, pPosBuf);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, pVelBuf);
+    gl.enableVertexAttribArray(1);
+    gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 0, 0);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE);
+    gl.drawArrays(gl.POINTS, 0, PN);
+    gl.disable(gl.BLEND);
+  }
 
   /* cursor chase */
   const ck = 1 - Math.exp(-dt * 30);
