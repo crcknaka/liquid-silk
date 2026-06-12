@@ -26,6 +26,8 @@ Press **1–9** (or click the rail on the left) to switch.
 
 ## Controls
 
+**Desktop / trackpad**
+
 | Gesture | Effect |
 |---|---|
 | `1–9` | Switch scenes (with a dip-to-black crossfade) |
@@ -35,6 +37,17 @@ Press **1–9** (or click the rail on the left) to switch.
 | Pinch | Smooth zoom (Safari gestures + ctrl-wheel in Chrome/Firefox) |
 | Click | Shockwave ripple (pushes particles too) |
 | Double click | Triple-ring burst + palette kick |
+
+**Touch (phone / tablet)**
+
+| Gesture | Effect |
+|---|---|
+| Scene rail (left) | Switch scenes |
+| One finger | Paint, swirl and steer the scene |
+| Two fingers pinch | Zoom |
+| Two fingers drag ↕ / ↔ | Shift palette / rotate flow |
+| Tap | Shockwave ripple |
+| Double tap | Triple-ring burst + palette kick |
 
 ## Details
 

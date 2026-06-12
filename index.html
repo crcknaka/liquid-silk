@@ -2,7 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#06060a">
 <title>LIQUID SILK — nine scenes</title>
 <style>
   :root {
@@ -19,13 +20,16 @@
     overscroll-behavior: none;
     -webkit-user-select: none;
     user-select: none;
+    touch-action: none;
+    -webkit-touch-callout: none;
   }
   canvas#gl {
     position: fixed;
     inset: 0;
-    width: 100vw;
-    height: 100vh;
+    width: 100%;
+    height: 100%;
     display: block;
+    touch-action: none;
   }
 
   /* ---------- custom cursor ---------- */
@@ -62,16 +66,21 @@
     display: flex;
     flex-direction: column;
     justify-content: space-between;
-    padding: clamp(20px, 4vw, 48px);
+    padding: calc(clamp(20px, 4vw, 48px) + env(safe-area-inset-top, 0px))
+             calc(clamp(20px, 4vw, 48px) + env(safe-area-inset-right, 0px))
+             calc(clamp(20px, 4vw, 48px) + env(safe-area-inset-bottom, 0px))
+             calc(clamp(20px, 4vw, 48px) + env(safe-area-inset-left, 0px));
     color: var(--ink);
   }
   header {
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
+    gap: 18px;
     opacity: 0;
     animation: fadeDown 1.4s cubic-bezier(.2,.8,.2,1) .3s forwards;
   }
+  .index { text-align: right; }
   .brand {
     font-size: 11px;
     letter-spacing: .42em;
@@ -117,7 +126,7 @@
   /* ---------- scene rail ---------- */
   .rail {
     position: fixed;
-    left: clamp(20px, 4vw, 48px);
+    left: calc(clamp(20px, 4vw, 48px) + env(safe-area-inset-left, 0px));
     top: 50%;
     transform: translateY(-50%);
     z-index: 30;
@@ -225,7 +234,14 @@
   @media (pointer: coarse) {
     body { cursor: auto; }
     .cursor-dot, .cursor-ring { display: none; }
-    .rail button { cursor: pointer; }
+    .rail { gap: 16px; }
+    .rail button { cursor: pointer; padding: 6px 0; }
+    .hints { display: none; }
+  }
+  @media (max-width: 640px) {
+    .brand span { display: none; }
+    .hero p { letter-spacing: .26em; }
+    .hints { display: none; }
   }
 </style>
 </head>
@@ -283,6 +299,7 @@ if (!gl) {
 
 const TRAIL_N = 24;
 const RIPPLE_N = 10;
+const isCoarse = matchMedia('(pointer: coarse)').matches;
 
 /* ---------------- shared GLSL ---------------- */
 
@@ -908,6 +925,7 @@ gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_
 
 /* particle buffers */
 const PN = 3000;
+const PCOUNT = isCoarse ? 1800 : PN;
 const pPos = new Float32Array(PN * 2);
 const pVel = new Float32Array(PN * 2);
 for (let i = 0; i < PN; i++) {
@@ -1052,7 +1070,18 @@ function spawnRipple(px, py, strength) {
   state.rippleHead = (state.rippleHead + 1) % RIPPLE_N;
 }
 
+function burst(x, y) {
+  spawnRipple(x, y, 1.4);
+  setTimeout(() => spawnRipple(x, y, 1.0), 90);
+  setTimeout(() => spawnRipple(x, y, 0.7), 200);
+  state.hueTarget += 0.45;
+}
+
 window.addEventListener('pointerdown', (e) => {
+  /* a finger can land far from the last point — reset so velocity doesn't spike */
+  state.rawMouse.x = e.clientX;
+  state.rawMouse.y = e.clientY;
+  lastPointerT = performance.now();
   spawnRipple(e.clientX, e.clientY, 0.8);
   cursorRing.style.width = cursorRing.style.height = '26px';
   cursorRing.style.margin = '-13px 0 0 -13px';
@@ -1062,11 +1091,57 @@ window.addEventListener('pointerup', () => {
   cursorRing.style.margin = '-21px 0 0 -21px';
 });
 window.addEventListener('dblclick', (e) => {
-  spawnRipple(e.clientX, e.clientY, 1.4);
-  setTimeout(() => spawnRipple(e.clientX, e.clientY, 1.0), 90);
-  setTimeout(() => spawnRipple(e.clientX, e.clientY, 0.7), 200);
-  state.hueTarget += 0.45;
+  if (isCoarse) return; // touch double-tap is handled in touchend
+  burst(e.clientX, e.clientY);
 });
+
+/* ---------------- touch: one finger paints, two fingers pinch & steer ---------------- */
+
+let touch2 = null;
+let lastTapT = 0, lastTapX = 0, lastTapY = 0;
+
+window.addEventListener('touchstart', (e) => {
+  if (e.touches.length === 2) {
+    const [a, b] = e.touches;
+    touch2 = {
+      dist: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY),
+      zoom: state.zoomTarget,
+      cx: (a.clientX + b.clientX) / 2,
+      cy: (a.clientY + b.clientY) / 2,
+    };
+  }
+}, { passive: true });
+
+window.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  if (e.touches.length === 2 && touch2) {
+    const [a, b] = e.touches;
+    const dist = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+    state.zoomTarget = Math.min(Math.max(touch2.zoom * dist / touch2.dist, 0.55), 3.2);
+    const cx = (a.clientX + b.clientX) / 2;
+    const cy = (a.clientY + b.clientY) / 2;
+    state.hueTarget  += (cy - touch2.cy) * -0.0012;
+    state.flowTarget += (cx - touch2.cx) * 0.0024;
+    touch2.cx = cx;
+    touch2.cy = cy;
+  }
+}, { passive: false });
+
+window.addEventListener('touchend', (e) => {
+  if (e.touches.length < 2) touch2 = null;
+  if (e.touches.length === 0 && e.changedTouches.length === 1) {
+    const t = e.changedTouches[0];
+    const now = performance.now();
+    if (now - lastTapT < 320 && Math.hypot(t.clientX - lastTapX, t.clientY - lastTapY) < 40) {
+      burst(t.clientX, t.clientY);
+      lastTapT = 0;
+    } else {
+      lastTapT = now;
+      lastTapX = t.clientX;
+      lastTapY = t.clientY;
+    }
+  }
+}, { passive: true });
 
 /* ---------------- trackpad: scroll + pinch ---------------- */
 
@@ -1087,6 +1162,7 @@ window.addEventListener('gesturestart', (e) => {
 });
 window.addEventListener('gesturechange', (e) => {
   e.preventDefault();
+  if (touch2) return; // two-finger touch pinch already handles zoom on touchscreens
   state.zoomTarget = Math.min(Math.max(state.gestureStartZoom * e.scale, 0.55), 3.2);
 });
 window.addEventListener('gestureend', (e) => e.preventDefault());
@@ -1094,12 +1170,14 @@ window.addEventListener('gestureend', (e) => e.preventDefault());
 /* ---------------- resize ---------------- */
 
 function resize() {
-  const dpr = Math.min(devicePixelRatio || 1, 2);
+  /* phones get a lower DPR cap — the shaders are heavy and small screens hide the difference */
+  const dpr = Math.min(devicePixelRatio || 1, isCoarse ? 1.6 : 2);
   canvas.width = Math.round(innerWidth * dpr);
   canvas.height = Math.round(innerHeight * dpr);
   gl.viewport(0, 0, canvas.width, canvas.height);
 }
 window.addEventListener('resize', resize);
+if (window.visualViewport) visualViewport.addEventListener('resize', resize);
 resize();
 
 /* ---------------- particle physics ---------------- */
@@ -1113,7 +1191,7 @@ function simParticles(dt) {
   const vx0 = state.smoothVel.x * 0.6, vy0 = state.smoothVel.y * 0.6;
   const t = timeNow;
 
-  for (let i = 0; i < PN; i++) {
+  for (let i = 0; i < PCOUNT; i++) {
     const ix = i * 2, iy = ix + 1;
     let px = pPos[ix], py = pPos[iy];
     let vx = pVel[ix], vy = pVel[iy];
@@ -1245,7 +1323,7 @@ function frame(now) {
     gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 0, 0);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.ONE, gl.ONE);
-    gl.drawArrays(gl.POINTS, 0, PN);
+    gl.drawArrays(gl.POINTS, 0, PCOUNT);
     gl.disable(gl.BLEND);
   }
 
