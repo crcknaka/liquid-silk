@@ -1120,8 +1120,11 @@ window.addEventListener('touchmove', (e) => {
     state.zoomTarget = Math.min(Math.max(touch2.zoom * dist / touch2.dist, 0.55), 3.2);
     const cx = (a.clientX + b.clientX) / 2;
     const cy = (a.clientY + b.clientY) / 2;
-    state.hueTarget  += (cy - touch2.cy) * -0.0012;
-    state.flowTarget += (cx - touch2.cx) * 0.0024;
+    /* gentle palette/flow steering; clamp per-frame delta so fast swipes don't slam the scene */
+    const dcx = Math.max(-12, Math.min(12, cx - touch2.cx));
+    const dcy = Math.max(-12, Math.min(12, cy - touch2.cy));
+    state.hueTarget  += dcy * -0.00030;
+    state.flowTarget += dcx * 0.00060;
     touch2.cx = cx;
     touch2.cy = cy;
   }
